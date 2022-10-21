@@ -25,11 +25,11 @@ if getattr(sys, 'frozen', False):
 elif __file__:
     dirname = os.path.dirname(__file__)
 
-if os.name == 'nt': # if on Windows
-	pathToGeckodriver = os.path.join(dirname, dir_depth, "geckodriver.exe")
-	dirname = os.path.join(dirname, "..")
+if os.name == 'nt':  # if on Windows
+    pathToGeckodriver = os.path.join(dirname, dir_depth, "geckodriver.exe")
+    dirname = os.path.join(dirname, "..")
 else:
-	pathToGeckodriver = os.path.join(dirname, dir_depth, "geckodriver")
+    pathToGeckodriver = os.path.join(dirname, dir_depth, "geckodriver")
 pathToFilmne = os.path.join(dirname, "Filmne etc.txt")
 pathToRunterladen = os.path.join(dirname, "Runterladen.txt")
 # pathToGeckodriver = "/home/peter/Schreibtisch/Dropbox/filmneZuRunterladen/geckodriver"
@@ -37,11 +37,10 @@ pathToRunterladen = os.path.join(dirname, "Runterladen.txt")
 # pathToRunterladen = "/home/peter/Schreibtisch/Dropbox/Runterladen.txt"
 
 
-
-
 firstTimeOnPage = False
 moviesOnNetflix = []
 moviesOnAmazon = []
+list_of_movies_which_could_not_be_found = []
 
 
 def start_thread():
@@ -99,6 +98,8 @@ def write_to_runterladen_file():
     to_write.extend(moviesOnNetflix)
     to_write.append("\n\nAmazon Prime:\n")
     to_write.extend(moviesOnAmazon)
+    to_write.append("\n\nUnauffindbar:\n")
+    to_write.extend(list_of_movies_which_could_not_be_found)
 
     runterladen = open(pathToRunterladen, "w", encoding='cp1252')
     for line in to_write:
@@ -156,13 +157,11 @@ def check_title(title: str):
         accept_cookies()
         firstTimeOnPage = True
 
-    navigate_to_movie_page(title)
-
-    if check_for_netflix():
-        moviesOnNetflix.append(title)
-
-    if check_for_amazon():
-        moviesOnAmazon.append(title)
+    if navigate_to_movie_page(title):
+        if check_for_netflix():
+            moviesOnNetflix.append(title)
+        if check_for_amazon():
+            moviesOnAmazon.append(title)
 
 
 def check_for_netflix():
@@ -192,20 +191,28 @@ def check_for_provider(provider_name: str):
 
 
 def navigate_to_movie_page(title: str):
+    results = List[str]
     had_exception = True
+    could_navigate_to_movie_page = True
     try:
         results = search(title)
-        results[1].click()
+        if not results:
+            list_of_movies_which_could_not_be_found.append(title)
+            could_navigate_to_movie_page = False
+        else:
+            results[0].click()
         had_exception = False
     except TimeoutException:
+        had_exception = False
         pass  # If there is only one movie with the given name, werstreamt.es will jump directly to the movie page
     except ElementClickInterceptedException:
         hide_cmpwrapper_if_present()
-        results[1].click()
+        results[0].click()
         had_exception = False
     finally:
         if had_exception is True:
             raise Exception('The Exception occurred while searching for this title: ', title)
+        return could_navigate_to_movie_page
 
 
 def hide_cmpwrapper_if_present():
@@ -213,21 +220,26 @@ def hide_cmpwrapper_if_present():
         cmp_wrapper = driver.find_element_by_id('cmpwrapper')
         driver.execute_script("arguments[0].style.visibility='hidden'", cmp_wrapper)
     except NoSuchElementException:
-        pass  # There seems to be nop element to click on
-
-
-
+        pass  # There seems to be no element to click on
 
 
 def search(title: str):
+    WebDriverWait(driver, 5).until(
+        EC.presence_of_element_located((By.ID, "NiceSearchForm_SearchForm_q"))
+    )
     search_bar = driver.find_element_by_id("NiceSearchForm_SearchForm_q")
+
+    search_bar.clear()
     search_bar.send_keys(title)
     search_bar.send_keys(Keys.RETURN)
     WebDriverWait(driver, 5).until(
-        EC.presence_of_element_located((By.CLASS_NAME, "results"))
+        EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Suche nach »%s« in Liste der Filme und Serien')]" % title))
     )
-    results_div = driver.find_element_by_class_name("results")
-    results_list = results_div.find_elements_by_tag_name("li")
+    movie_year = title.split('(')[1].replace(')', '')
+    WebDriverWait(driver, 5).until(
+        EC.presence_of_element_located((By.XPATH, "//*[contains(text(), ', %s')]" % movie_year))
+    )
+    results_list = driver.find_elements_by_xpath("//*[contains(text(), ', %s')]" % movie_year)
     return results_list
 
 
