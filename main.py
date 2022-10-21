@@ -7,6 +7,7 @@ import re
 import sys
 import threading
 import tkinter
+from datetime import datetime, timedelta
 
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, ElementClickInterceptedException
@@ -51,45 +52,78 @@ def start_thread():
     thread = threading.Thread(target=check_all_movie_titles)
     thread.setDaemon(True)
     thread.start()
-    progress_header_label.config(text="Startup...")
+    header_label.config(text="Startup...")
     start_button.config(state="disabled")
     headless_checkbutton.config(state="disabled")
 
 
+
 root = tkinter.Tk()
 headless_var = tkinter.BooleanVar()
+play_sound_var = tkinter.BooleanVar()
 frame = tkinter.Frame(root)
-progress_header_label = tkinter.Label(frame, text="", anchor="w", padx=10, pady=10)
+header_label = tkinter.Label(root, text="", anchor="w", padx=10, pady=10)
 progress_label = tkinter.Label(frame, text="", anchor="w", padx=10, pady=10)
+time_progress_label = tkinter.Label(frame, text="", anchor="w", padx=10, pady=10)
 start_button = tkinter.Button(root, text="Start", padx=10, command=start_thread)
 headless_checkbutton = tkinter.Checkbutton(root, text="Show Window", variable=headless_var)
+play_sound_checkbutton = tkinter.Checkbutton(root, text="Play Sound When Finished", variable=play_sound_var)
 
 
 def check_all_movie_titles():
-    movie_names = get_all_movies()
+    try:
+        movie_names = get_all_movies()
+        number_of_items_to_use_for_time_extrapolation = 10
+        number_of_movies = len(movie_names)
+        extrapolation_length = number_of_movies/number_of_items_to_use_for_time_extrapolation
+        extrapolation_time_calculated = False
+        extrapolation_time = ''
+        time_progress_label.config(text='Calculating approximate length...')
+        start_time = datetime.now().replace(microsecond=0)
 
-    for movieName in movie_names:
-        check_title(movieName)
-        update_progress_bar(len(movie_names), movie_names.index(movieName))
+        for index, movieName in enumerate(movie_names):
+            if index is number_of_items_to_use_for_time_extrapolation:
+                end_time = datetime.now().replace(microsecond=0)
+                duration_time = (end_time - start_time) * extrapolation_length
+                duration_seconds = duration_time.seconds
+                duration_time_with_rounded_seconds = timedelta(seconds=duration_seconds)
+                extrapolation_time_calculated = True
+                extrapolation_time = str(duration_time_with_rounded_seconds)
+            check_title(movieName)
+            update_progress_bar(number_of_movies, index)
+            if extrapolation_time_calculated:
+                current_time = datetime.now().replace(microsecond=0)
+                elapsed_time = str(current_time - start_time)
+                time_progress = "Approximate Length: %s/%s" % (elapsed_time, extrapolation_time)
+                time_progress_label.config(text=time_progress)
+        write_to_runterladen_file()
+        if play_sound_var.get():
+            print('\007')  # do the finished sound
 
-    write_to_runterladen_file()
-    progress_header_label.config(text="Analyzing finished. Movies have been written to file.")
-    progress_label.config(text="")
+    except Exception as e:
+        header_label.config(text="ERROR", bg="red")
+        raise type(e)(e.message)
+
+    header_label.config(text="Analyzing finished. Movies have been written to file.", bg="green")
+
 
 
 def main():
     tkinter.Label(root, text="Filmne ===> Runterladen", font=('Arial', 20), padx=10, pady=10).grid(row=0, column=0)
 
     headless_checkbutton.grid(row=1, column=0)
-    start_button.grid(row=2, column=0)
+    play_sound_checkbutton.grid(row=2, column=0)
+    start_button.grid(row=3, column=0)
 
-    frame.grid(row=3, column=0)
-    progress_header_label.grid(row=0, column=0)
-    progress_label.grid(row=0, column=1)
+    frame.grid(row=5, column=0)
+    header_label.grid(row=4, column=0)
+    progress_label.grid(row=1, column=0)
+    time_progress_label.grid(row=1, column=1)
 
     tkinter.Label(root,
                   text="Note: Results will only be written to Runterladen.txt after all movies have been analyzed.",
-                  font=('Arial', 7), padx=10, pady=10).grid(row=4, column=0)
+                  font=('Arial', 7), padx=10, pady=10).grid(row=6, column=0)
+    play_sound_checkbutton.select()
     root.mainloop()
 
 
@@ -107,8 +141,8 @@ def write_to_runterladen_file():
 
 
 def update_progress_bar(nr_of_all_movies: int, nr_of_current_movie: int):
-    progress_header_label.config(text="Analysing Movie: ")
-    progress = str(nr_of_current_movie + 1) + "/" + str(nr_of_all_movies)
+    header_label.config(text="Analysing...")
+    progress = "Analyzing Movie: %s/%s" % (str(nr_of_current_movie + 1), str(nr_of_all_movies))
     progress_label.config(text=progress)
     pass
 
@@ -152,7 +186,7 @@ def remove_all_comments(filmne_string_list: List[str]):
 
 def check_title(title: str):
     global firstTimeOnPage
-    if firstTimeOnPage is False:
+    if not firstTimeOnPage:
         driver.get("https://www.werstreamt.es")
         accept_cookies()
         firstTimeOnPage = True
@@ -210,7 +244,7 @@ def navigate_to_movie_page(title: str):
         results[0].click()
         had_exception = False
     finally:
-        if had_exception is True:
+        if had_exception:
             raise Exception('The Exception occurred while searching for this title: ', title)
         return could_navigate_to_movie_page
 
@@ -233,7 +267,8 @@ def search(title: str):
     search_bar.send_keys(title)
     search_bar.send_keys(Keys.RETURN)
     WebDriverWait(driver, 5).until(
-        EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Suche nach »%s« in Liste der Filme und Serien')]" % title))
+        EC.presence_of_element_located(
+            (By.XPATH, "//*[contains(text(), 'Suche nach »%s« in Liste der Filme und Serien')]" % title))
     )
     movie_year = title.split('(')[1].replace(')', '')
     WebDriverWait(driver, 5).until(
