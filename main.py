@@ -9,7 +9,7 @@ import threading
 import tkinter
 
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, ElementClickInterceptedException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.wait import WebDriverWait
@@ -178,8 +178,8 @@ def check_for_provider(provider_name: str):
 
     for provider in providers:
         try:
-            provider.find_element_by_id(
-                provider_name)  # Will throw an exception if this is not the right provider, thereby skipping this provider
+            provider.find_element_by_id(provider_name)
+            # Will throw an exception if this is not the right provider, thereby skipping this provider
             image = provider.find_element_by_tag_name("i")
             style = image.get_attribute("style")
             if "green" in style:
@@ -192,12 +192,31 @@ def check_for_provider(provider_name: str):
 
 
 def navigate_to_movie_page(title: str):
+    had_exception = True
     try:
         results = search(title)
-
         results[1].click()
+        had_exception = False
     except TimeoutException:
         pass  # If there is only one movie with the given name, werstreamt.es will jump directly to the movie page
+    except ElementClickInterceptedException:
+        hide_cmpwrapper_if_present()
+        results[1].click()
+        had_exception = False
+    finally:
+        if had_exception is True:
+            raise Exception('The Exception occurred while searching for this title: ', title)
+
+
+def hide_cmpwrapper_if_present():
+    try:
+        cmp_wrapper = driver.find_element_by_id('cmpwrapper')
+        driver.execute_script("arguments[0].style.visibility='hidden'", cmp_wrapper)
+    except NoSuchElementException:
+        pass  # There seems to be nop element to click on
+
+
+
 
 
 def search(title: str):
